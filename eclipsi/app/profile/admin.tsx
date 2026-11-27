@@ -1,5 +1,10 @@
+import { Head } from 'expo-router/head';
+import { withRouteGuard, useLogout } from '../../components/RouteGuard';
+import { palette } from '../../lib/palette';
 import React, { useState, useEffect } from 'react';
-import { api, ApiError } from '../../lib/api';
+import { api, ApiError, setProfileAvatar, subscribeProfileAvatar } from '../../lib/api';
+import * as ImagePicker from 'expo-image-picker';
+import { Ionicons } from '@expo/vector-icons';
 import {
   StyleSheet,
   View,
@@ -16,7 +21,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 const avatar = require('../../assets/images/avatar.png');
 
-export default function AdminScreen() {
+function AdminScreen() {
+  const logout = useLogout();
   // Estados para navegação e controle de abas/sidebar
   const [activeTab, setActiveTab] = useState('usuarios');
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -24,12 +30,13 @@ export default function AdminScreen() {
   // Estados de dados da API
   const [users, setUsers] = useState<any[]>([]);
   const [stats, setStats] = useState<any>({
-    total_pacientes: 0,
-    total_medicos: 0,
-    receita: {},
+    pacientes: 0,
+    medicos: 0,
+    pagamentos: { valor: 0, taxa_plataforma: 0, repasse: 0 },
     especialidades: {},
   });
   const [adminProfile, setAdminProfile] = useState({ nome: '', email: '' });
+  const [adminPhoto, setAdminPhoto] = useState<string | null>(null);
   const [adminPassword, setAdminPassword] = useState('');
 
   // Estados de Busca e Edição de Usuários
@@ -40,7 +47,7 @@ export default function AdminScreen() {
   // Funções de API simuladas / adaptadas para React Native (fetch)
   const loadUsers = async (query = '') => {
     try {
-      const data = await api<{ success?: boolean; users?: any[] }>('/api/admin/users');
+      const data = await api<{ success?: boolean; users?: any[] }>('/api/v1/admin/users');
       if (data.success) {
         let filtered = data.users ?? [];
         if (query) {
@@ -60,7 +67,7 @@ export default function AdminScreen() {
 
   const loadStats = async () => {
     try {
-      const data = await api<{ success?: boolean; stats?: any }>('/api/admin/stats');
+      const data = await api<{ success?: boolean; stats?: any }>('/api/v1/admin/stats');
       if (data.success) {
         setStats(data.stats ?? {});
       }
@@ -72,12 +79,14 @@ export default function AdminScreen() {
 
   const loadAdminProfile = async () => {
     try {
-      const data = await api<{ success?: boolean; admin?: { nome?: string; email?: string } }>('/api/admin/profile');
+      const data = await api<{ success?: boolean; user?: { nome?: string; email?: string; foto?: string } }>('/api/me');
       if (data.success) {
         setAdminProfile({
-          nome: data.admin?.nome || '',
-          email: data.admin?.email || '',
+          nome: data.user?.nome || '',
+          email: data.user?.email || '',
         });
+        setAdminPhoto(data.user?.foto || null);
+        setProfileAvatar(data.user?.foto || null);
       }
     } catch (e) {
       console.error('Erro ao carregar perfil do administrador:', e);
@@ -88,18 +97,20 @@ export default function AdminScreen() {
   // Carregamento inicial de dados equivalentes ao DOMContentLoaded
   /* eslint-disable react-hooks/set-state-in-effect -- os dados sao carregados por chamadas externas ao montar a tela */
   useEffect(() => {
+    const unsubscribeAvatar = subscribeProfileAvatar(setAdminPhoto);
     loadUsers();
     loadStats();
     loadAdminProfile();
+    return unsubscribeAvatar;
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleUpdateUser = async () => {
     if (!selectedUser) return;
     try {
-      const result = await api<{ success?: boolean; message?: string }>(`/api/admin/users/${encodeURIComponent(selectedUser.id)}`, {
-        method: 'PUT',
-        body: JSON.stringify(selectedUser),
+      const result = await api<{ success?: boolean; message?: string }>(`/api/v1/admin/users/${encodeURIComponent(selectedUser.id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ role: selectedUser.role }),
       });
       Alert.alert(result.message || 'Usuario atualizado.');
       if (result.success) {
@@ -114,7 +125,7 @@ export default function AdminScreen() {
   const handleDeleteUser = async () => {
     if (!selectedUser) return;
     try {
-      const result = await api<{ success?: boolean; message?: string }>(`/api/admin/users/${encodeURIComponent(selectedUser.id)}`, { method: 'DELETE' });
+      const result = await api<{ success?: boolean; message?: string }>(`/api/v1/admin/users/${encodeURIComponent(selectedUser.id)}`, { method: 'DELETE' });
       Alert.alert(result.message || 'Usuario excluido.');
       if (result.success) {
         setEditModalVisible(false);
@@ -127,18 +138,31 @@ export default function AdminScreen() {
 
   const handleUpdateAdminProfile = async () => {
     try {
-      const data = {
-        nome: adminProfile.nome,
-        email: adminProfile.email,
-        senha: adminPassword,
-      };
-      const result = await api<{ success?: boolean; message?: string }>('/api/admin/profile', {
-        method: 'PUT',
-        body: JSON.stringify(data),
+      const result = await api<{ success?: boolean; message?: string }>('/api/v1/profile/me', {
+        method: 'PATCH',
+        body: JSON.stringify({ nome: adminProfile.nome, ...(adminPhoto ? { foto: adminPhoto } : {}) }),
       });
       Alert.alert(result.message || 'Perfil atualizado.');
     } catch (err) {
       Alert.alert('Erro', err instanceof ApiError ? err.message : 'Erro ao atualizar perfil de administrador.');
+    }
+  };
+
+  const chooseAdminPhoto = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+      base64: true,
+    });
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      const uri = asset.base64 ? `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}` : asset.uri;
+      setAdminPhoto(uri);
+      setProfileAvatar(uri);
     }
   };
 
@@ -151,24 +175,29 @@ export default function AdminScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
+        <View style={[styles.headerLeft, { flexDirection: "row", alignItems: "center", gap: 10, flexShrink: 1 }]}>
           <TouchableOpacity
-            style={styles.burgerBtn}
+            style={[styles.burgerBtn, { width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", padding: 0 }]}
+            accessibilityLabel="Abrir menu"
             onPress={() => setSidebarOpen(true)}
             activeOpacity={0.7}
           >
-            <View style={styles.burgerLine} />
-            <View style={styles.burgerLine} />
-            <View style={styles.burgerLine} />
+            <Ionicons aria-hidden name="menu" size={26} color={palette.white} />
           </TouchableOpacity>
-          <Text style={styles.logo}>MinhaLogo | Administrador</Text>
+          <Image
+            source={require("../../assets/images/logo.png")}
+            style={{ width: 40, height: 40 }}
+            resizeMode="contain"
+          />
+          <Text style={styles.logo}>EcliPsi</Text>
+          <View style={styles.adminBadge}><Text style={styles.adminBadgeText}>ADMINISTRADOR</Text></View>
         </View>
 
         <View style={styles.headerRight}>
           <TextInput
             style={styles.searchInput}
             placeholder="Buscar usuários..."
-            placeholderTextColor="#666"
+            placeholderTextColor={palette.muted}
             maxLength={100}
             onChangeText={(text) => {
               setSearchQuery(text);
@@ -177,7 +206,7 @@ export default function AdminScreen() {
             value={searchQuery}
           />
           <Image
-            source={avatar}
+            source={adminPhoto ? { uri: adminPhoto } : avatar}
             style={styles.profileImg}
           />
         </View>
@@ -238,13 +267,11 @@ export default function AdminScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
+            accessibilityRole="button" accessibilityLabel="Sair"
             style={[styles.navItem, styles.logoutItem]}
-            onPress={() => {
-              setActiveTab('sair');
-              setSidebarOpen(false);
-            }}
+            onPress={logout}
           >
-            <Text style={styles.logoutText}>Sair</Text>
+            <Text style={styles.logoutText}><Ionicons aria-hidden name="log-out-outline" size={17} color={palette.wine} /> Sair</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -260,7 +287,7 @@ export default function AdminScreen() {
             <TextInput
               style={styles.subSearchInput}
               placeholder="Buscar por nome ou e-mail..."
-              placeholderTextColor="#888"
+              placeholderTextColor={palette.muted}
               maxLength={100}
               onChangeText={(text) => loadUsers(text)}
             />
@@ -274,14 +301,24 @@ export default function AdminScreen() {
               </View>
 
               {users.map((user, index) => {
-                const isMed = user.role === 'medico';
+                const role = String(user.role || '').toLowerCase();
+                const badgeStyle = role === 'admin'
+                  ? styles.badgeAdmin
+                  : (role === 'medico' || role === 'profissional')
+                    ? styles.badgeMed
+                    : styles.badgePac;
+                const badgeTextStyle = role === 'admin'
+                  ? styles.badgeTextAdmin
+                  : (role === 'medico' || role === 'profissional')
+                    ? styles.badgeTextMed
+                    : styles.badgeTextPac;
                 return (
                   <View key={index} style={styles.tableRow}>
                     <Text style={[styles.tableCell, { flex: 2 }]}>{user.nome}</Text>
                     <Text style={[styles.tableCell, { flex: 2 }]}>{user.email}</Text>
                     <View style={{ flex: 1.5 }}>
-                      <View style={[styles.badge, isMed ? styles.badgeMed : styles.badgePac]}>
-                        <Text style={[styles.badgeText, isMed ? styles.badgeTextMed : styles.badgeTextPac]}>
+                      <View style={[styles.badge, badgeStyle]}>
+                        <Text style={[styles.badgeText, badgeTextStyle]}>
                           {user.role}
                         </Text>
                       </View>
@@ -315,21 +352,17 @@ export default function AdminScreen() {
               <View style={styles.earningsGrid}>
                 <View style={styles.earningsCard}>
                   <Text style={styles.earningsLabel}>Arrecadado neste Mês</Text>
-                  <Text style={styles.earningsValue}>{brl(stats.receita?.mes_atual)}</Text>
-                  <Text style={styles.earningsSubtext}>
-                    {stats.receita?.variacao_pct == null
-                      ? 'Sem dados do mês anterior'
-                      : `${stats.receita?.variacao_pct >= 0 ? '+' : ''}${stats.receita?.variacao_pct}% que o mês anterior`}
-                  </Text>
+                  <Text style={styles.earningsValue}>{brl(stats.pagamentos?.valor)}</Text>
+                  <Text style={styles.earningsSubtext}>Valor total registrado</Text>
                 </View>
 
                 <View style={[styles.earningsCard, styles.earningsCardHighlight]}>
                   <Text style={[styles.earningsLabel, styles.highlightText]}>
-                    Arrecadado no Ano ({stats.receita?.ano_ref})
+                    Taxa da plataforma
                   </Text>
-                  <Text style={[styles.earningsValue, styles.highlightValue]}>{brl(stats.receita?.ano)}</Text>
+                  <Text style={[styles.earningsValue, styles.highlightValue]}>{brl(stats.pagamentos?.taxa_plataforma)}</Text>
                   <Text style={[styles.earningsSubtext, styles.highlightSub]}>
-                    Taxa: {brl(stats.receita?.taxa_ano)} · Repasses: {brl(stats.receita?.repasse_ano)}
+                    Repasse: {brl(stats.pagamentos?.repasse)}
                   </Text>
                 </View>
               </View>
@@ -340,12 +373,12 @@ export default function AdminScreen() {
               <View style={styles.earningsGrid}>
                 <View style={styles.earningsCard}>
                   <Text style={styles.earningsLabel}>Usuários Comuns (Pacientes)</Text>
-                  <Text style={styles.earningsValue}>{stats.total_pacientes}</Text>
+                  <Text style={styles.earningsValue}>{stats.pacientes}</Text>
                   <Text style={styles.earningsSubtext}>Total registrado na base</Text>
                 </View>
                 <View style={styles.earningsCard}>
                   <Text style={styles.earningsLabel}>Médicos / Profissionais</Text>
-                  <Text style={styles.earningsValue}>{stats.total_medicos}</Text>
+                  <Text style={styles.earningsValue}>{stats.medicos}</Text>
                   <Text style={styles.earningsSubtext}>Total registrado na base</Text>
                 </View>
               </View>
@@ -354,23 +387,27 @@ export default function AdminScreen() {
             <View style={{ marginTop: 24 }}>
               <Text style={styles.earningsTitle}>Profissionais por Especialidade</Text>
               <View style={styles.statsCategoryGrid}>
-                {Object.keys(stats.especialidades || {}).length === 0 ? (
-                  <Text style={{ color: '#666' }}>Nenhum profissional cadastrado por enquanto.</Text>
-                ) : (
-                  Object.entries(stats.especialidades || {}).map(([esp, count]: [string, any], idx) => {
-                    const totalMedicos = stats.total_medicos || 1;
+                {(() => {
+                  const especialidades = Array.isArray(stats.especialidades)
+                    ? stats.especialidades
+                    : Object.entries(stats.especialidades || {}).map(([especialidade, total]) => ({ especialidade, total }));
+                  return especialidades.length === 0 ? (
+                  <Text style={{ color: palette.muted }}>Nenhum profissional cadastrado por enquanto.</Text>
+                  ) : especialidades.map((item: any, idx: number) => {
+                    const esp = String(item.especialidade || item.nome || 'Não informada');
+                    const count = Number(item.total ?? item.count ?? 0);
+                    const totalMedicos = stats.medicos || 1;
                     const percentage = ((count / totalMedicos) * 100).toFixed(1);
-                    const espName = esp.charAt(0).toUpperCase() + esp.slice(1);
 
                     return (
                       <View key={idx} style={styles.categoryCard}>
-                        <Text style={styles.categoryCardTitle}>{espName}s</Text>
+                        <Text style={styles.categoryCardTitle}>{esp}</Text>
                         <Text style={styles.categoryCardCount}>{count}</Text>
                         <Text style={styles.categoryCardSub}>{percentage}% do total</Text>
                       </View>
                     );
-                  })
-                )}
+                  });
+                })()}
               </View>
             </View>
           </View>
@@ -386,10 +423,10 @@ export default function AdminScreen() {
               <View style={styles.settingsGroup}>
                 <View style={styles.profileAvatarWrapper}>
                   <Image
-                    source={avatar}
+                    source={adminPhoto ? { uri: adminPhoto } : avatar}
                     style={styles.profileAvatarLg}
                   />
-                  <TouchableOpacity style={styles.avatarUploadBtn}>
+                  <TouchableOpacity style={styles.avatarUploadBtn} onPress={chooseAdminPhoto}>
                     <Text style={styles.avatarUploadText}>Alterar Foto</Text>
                   </TouchableOpacity>
                 </View>
@@ -418,7 +455,7 @@ export default function AdminScreen() {
                   <TextInput
                     style={styles.formInput}
                     placeholder="Deixe em branco para manter a atual"
-                    placeholderTextColor="#999"
+                    placeholderTextColor={palette.muted}
                     secureTextEntry
                     value={adminPassword}
                     onChangeText={setAdminPassword}
@@ -435,35 +472,30 @@ export default function AdminScreen() {
             </View>
           </View>
         )}
-
-        {/* Aba 4: Sair */}
-        {activeTab === 'sair' && (
-          <View style={styles.pageContent}>
-            <Text style={styles.pageTitle}>Sessão Encerrada</Text>
-            <Text style={styles.pageSubtitle}>Você desconectou da conta do Administrador.</Text>
-          </View>
-        )}
       </ScrollView>
 
       {/* Navegação Inferior (Mobile Footer Navbar) */}
       <View style={styles.bottomNav}>
         <TouchableOpacity
+          accessibilityRole="button" accessibilityLabel="Usuários"
           style={[styles.bottomNavItem, activeTab === 'usuarios' && styles.bottomNavItemActive]}
           onPress={() => setActiveTab('usuarios')}
         >
-          <Text style={[styles.bottomNavIcon, activeTab === 'usuarios' && styles.bottomNavIconActive]}>👥</Text>
+          <Ionicons aria-hidden name="people-outline" size={22} color={palette.cream} />
         </TouchableOpacity>
         <TouchableOpacity
+          accessibilityRole="button" accessibilityLabel="Estatísticas"
           style={[styles.bottomNavItem, activeTab === 'estatisticas' && styles.bottomNavItemActive]}
           onPress={() => setActiveTab('estatisticas')}
         >
-          <Text style={[styles.bottomNavIcon, activeTab === 'estatisticas' && styles.bottomNavIconActive]}>📈</Text>
+          <Ionicons aria-hidden name="stats-chart-outline" size={22} color={palette.cream} />
         </TouchableOpacity>
         <TouchableOpacity
+          accessibilityRole="button" accessibilityLabel="Perfil administrativo"
           style={[styles.bottomNavItem, activeTab === 'perfil' && styles.bottomNavItemActive]}
           onPress={() => setActiveTab('perfil')}
         >
-          <Text style={[styles.bottomNavIcon, activeTab === 'perfil' && styles.bottomNavIconActive]}>⚙️</Text>
+          <Ionicons aria-hidden name="settings-outline" size={22} color={palette.cream} />
         </TouchableOpacity>
       </View>
 
@@ -540,14 +572,29 @@ export default function AdminScreen() {
   );
 }
 
+const GuardedScreen = withRouteGuard(AdminScreen, 'admin');
+
+export default function Route() {
+  return (
+    <>
+      <Head>
+        <title>EcliPsi — Administração</title>
+      </Head>
+      <GuardedScreen />
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#f5dfff',
+    backgroundColor: palette.cream,
   },
   header: {
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.indigo,
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 12,
@@ -556,11 +603,13 @@ const styles = StyleSheet.create({
   },
   headerLeft: {
     flexDirection: 'row',
+    maxWidth: '100%',
     alignItems: 'center',
     gap: 16,
   },
   headerRight: {
     flexDirection: 'row',
+    marginLeft: 'auto',
     alignItems: 'center',
     gap: 16,
   },
@@ -573,13 +622,25 @@ const styles = StyleSheet.create({
   burgerLine: {
     width: 24,
     height: 3,
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     borderRadius: 2,
   },
   logo: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: palette.white,
+  },
+  adminBadge: {
+    marginLeft: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    backgroundColor: palette.salmon,
+  },
+  adminBadgeText: {
+    color: palette.indigo,
+    fontSize: 10,
+    fontWeight: '900',
   },
   profileImg: {
     width: 40,
@@ -587,12 +648,12 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   searchInput: {
-    backgroundColor: '#f5dfff',
+    backgroundColor: palette.cream,
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
     fontSize: 14,
-    color: '#333333',
+    color: palette.indigo,
     width: 140,
   },
   sidebarOverlay: {
@@ -610,10 +671,10 @@ const styles = StyleSheet.create({
     left: -280,
     width: 280,
     height: '100%',
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     zIndex: 100,
     elevation: 10,
-    shadowColor: '#000',
+    shadowColor: palette.indigo,
     shadowOffset: { width: 2, height: 0 },
     shadowOpacity: 0.15,
     shadowRadius: 10,
@@ -626,15 +687,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.indigo,
   },
   sidebarTitle: {
-    color: '#ffffff',
+    color: palette.white,
     fontSize: 16,
     fontWeight: 'bold',
   },
   closeBtn: {
-    color: '#ffffff',
+    color: palette.white,
     fontSize: 28,
   },
   sidebarNav: {
@@ -645,14 +706,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   navItemActive: {
-    backgroundColor: '#f5dfff',
+    backgroundColor: palette.wine,
+    borderRadius: 12,
   },
   navItemText: {
     fontSize: 16,
-    color: '#333333',
+    color: palette.indigo,
   },
   navItemTextActive: {
-    color: '#7500a8',
+    color: palette.white,
     fontWeight: 'bold',
   },
   logoutItem: {
@@ -660,7 +722,7 @@ const styles = StyleSheet.create({
   },
   logoutText: {
     fontSize: 16,
-    color: '#d9534f',
+    color: palette.wine,
     fontWeight: 'bold',
   },
   contentContainer: {
@@ -673,12 +735,12 @@ const styles = StyleSheet.create({
   pageTitle: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#7500a8',
+    color: palette.indigo,
     marginBottom: 8,
   },
   pageSubtitle: {
     fontSize: 14,
-    color: '#666666',
+    color: palette.muted,
     marginBottom: 16,
   },
   subSearchInput: {
@@ -687,16 +749,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: palette.border,
     borderRadius: 20,
     marginBottom: 16,
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
   },
   tableContainer: {
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     borderRadius: 12,
     padding: 12,
-    shadowColor: '#000',
+    shadowColor: palette.indigo,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 12,
@@ -704,14 +766,14 @@ const styles = StyleSheet.create({
   },
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: '#f5dfff',
+    backgroundColor: palette.cream,
     paddingVertical: 10,
     paddingHorizontal: 8,
     borderTopLeftRadius: 8,
     borderTopRightRadius: 8,
   },
   tableHeaderText: {
-    color: '#7500a8',
+    color: palette.indigo,
     fontWeight: 'bold',
     fontSize: 13,
   },
@@ -721,11 +783,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    borderBottomColor: palette.border,
   },
   tableCell: {
     fontSize: 13,
-    color: '#333333',
+    color: palette.indigo,
   },
   badge: {
     paddingVertical: 4,
@@ -733,20 +795,22 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignSelf: 'flex-start',
   },
-  badgeMed: { backgroundColor: '#f3e5f5' },
-  badgePac: { backgroundColor: '#e3f2fd' },
+  badgeAdmin: { backgroundColor: palette.salmon },
+  badgeMed: { backgroundColor: palette.cream },
+  badgePac: { backgroundColor: palette.neutral },
   badgeText: { fontSize: 11, fontWeight: 'bold' },
-  badgeTextMed: { color: '#7500a8' },
-  badgeTextPac: { color: '#1976d2' },
+  badgeTextAdmin: { color: palette.indigo },
+  badgeTextMed: { color: palette.indigo },
+  badgeTextPac: { color: palette.muted },
   btnEditUser: {
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.indigo,
     paddingVertical: 6,
     paddingHorizontal: 10,
     borderRadius: 16,
     alignItems: 'center',
   },
   btnEditText: {
-    color: '#ffffff',
+    color: palette.white,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -756,87 +820,87 @@ const styles = StyleSheet.create({
   earningsTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#58007e',
+    color: palette.indigo,
     marginBottom: 12,
   },
   earningsGrid: {
     gap: 16,
   },
   earningsCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     borderRadius: 12,
     padding: 16,
     borderLeftWidth: 4,
-    borderLeftColor: '#7500a8',
-    shadowColor: '#000',
+    borderLeftColor: palette.indigo,
+    shadowColor: palette.indigo,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 12,
     elevation: 3,
   },
   earningsCardHighlight: {
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.indigo,
     borderLeftWidth: 0,
   },
   earningsLabel: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#666666',
+    color: palette.muted,
     marginBottom: 6,
   },
-  highlightText: { color: '#e2c1f7' },
+  highlightText: { color: palette.salmon },
   earningsValue: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#7500a8',
+    color: palette.indigo,
     marginBottom: 4,
   },
-  highlightValue: { color: '#ffffff' },
+  highlightValue: { color: palette.white },
   earningsSubtext: {
     fontSize: 11,
     fontWeight: 'bold',
-    color: '#2e7d32',
+    color: palette.indigo,
   },
-  highlightSub: { color: '#f5dfff', fontWeight: 'normal' },
+  highlightSub: { color: palette.cream, fontWeight: 'normal' },
   statsCategoryGrid: {
     gap: 16,
   },
   categoryCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     borderRadius: 10,
     padding: 16,
     borderTopWidth: 4,
-    borderTopColor: '#7500a8',
-    shadowColor: '#000',
+    borderTopColor: palette.indigo,
+    shadowColor: palette.indigo,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
     shadowRadius: 8,
     elevation: 2,
   },
   categoryCardTitle: {
-    color: '#555',
+    color: palette.muted,
     fontSize: 13,
     marginBottom: 8,
   },
   categoryCardCount: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#7500a8',
+    color: palette.indigo,
   },
   categoryCardSub: {
     fontSize: 11,
-    color: '#666',
+    color: palette.muted,
     marginTop: 4,
   },
   settingsForm: {
     marginTop: 10,
   },
   settingsGroup: {
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     borderRadius: 12,
     padding: 20,
     gap: 16,
-    shadowColor: '#000',
+    shadowColor: palette.indigo,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 12,
@@ -851,16 +915,16 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: 60,
     borderWidth: 3,
-    borderColor: '#7500a8',
+    borderColor: palette.indigo,
   },
   avatarUploadBtn: {
-    backgroundColor: '#f5dfff',
+    backgroundColor: palette.cream,
     paddingVertical: 6,
     paddingHorizontal: 14,
     borderRadius: 16,
   },
   avatarUploadText: {
-    color: '#7500a8',
+    color: palette.indigo,
     fontSize: 12,
     fontWeight: 'bold',
   },
@@ -870,20 +934,22 @@ const styles = StyleSheet.create({
   formLabel: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: '#444',
+    color: palette.muted,
   },
   formInput: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: palette.border,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 14,
-    backgroundColor: '#fff',
-    color: '#333',
+    backgroundColor: palette.white,
+    color: palette.indigo,
   },
   saveSettingsBtn: {
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.magenta,
+    borderBottomWidth: 3,
+    borderBottomColor: palette.wine,
     paddingVertical: 10,
     paddingHorizontal: 16,
     borderRadius: 20,
@@ -891,9 +957,9 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   saveSettingsText: {
-    color: '#ffffff',
+    color: palette.white,
     fontWeight: 'bold',
-    fontSize: 14,
+    fontSize: 19,
   },
   bottomNav: {
     position: 'absolute',
@@ -901,7 +967,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 60,
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.indigo,
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
@@ -913,12 +979,8 @@ const styles = StyleSheet.create({
   },
   bottomNavItemActive: {
     opacity: 1,
-  },
-  bottomNavIcon: {
-    fontSize: 22,
-  },
-  bottomNavIconActive: {
-    fontSize: 22,
+    backgroundColor: palette.wine,
+    borderRadius: 12,
   },
   modalBackdrop: {
     flex: 1,
@@ -929,10 +991,10 @@ const styles = StyleSheet.create({
   modalContent: {
     width: '90%',
     maxHeight: '85%',
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     borderRadius: 12,
     padding: 20,
-    shadowColor: '#000',
+    shadowColor: palette.indigo,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
@@ -946,27 +1008,27 @@ const styles = StyleSheet.create({
   },
   modalCloseText: {
     fontSize: 24,
-    color: '#333',
+    color: palette.indigo,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
+    color: palette.indigo,
   },
   modalSub: {
     fontSize: 12,
-    color: '#666',
+    color: palette.muted,
     marginTop: 2,
   },
   btnDeleteUser: {
-    backgroundColor: '#d9534f',
+    backgroundColor: palette.wine,
     paddingVertical: 10,
     borderRadius: 8,
     alignItems: 'center',
     marginTop: 12,
   },
   btnDeleteUserText: {
-    color: '#ffffff',
+    color: palette.white,
     fontWeight: 'bold',
     fontSize: 14,
   },

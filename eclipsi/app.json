@@ -21,8 +21,15 @@
     },
     "web": {
       "bundler": "metro",
-      "output": "server",
-      "favicon": "./assets/images/favicon.png"
+      "output": "static",
+      "favicon": "./assets/images/logo.png",
+      "name": "EcliPsi",
+      "shortName": "EcliPsi",
+      "description": "Busca, agendamento e acompanhamento em saúde mental",
+      "themeColor": "#2E2382",
+      "backgroundColor": "#FFF0C2",
+      "display": "standalone",
+      "orientation": "portrait"
     },
     "plugins": [
       "expo-router",
@@ -33,7 +40,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true

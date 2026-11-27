@@ -1,4 +1,11 @@
-import React, { useState } from 'react';
+import { Head } from 'expo-router/head';
+import { AvailabilityPanel } from '../../components/appointments/AvailabilityPanel';
+import { withRouteGuard, useLogout } from '../../components/RouteGuard';
+import { palette } from '../../lib/palette';
+import React, { useEffect, useState } from 'react';
+import { api, ApiError } from '../../lib/api';
+import * as ImagePicker from 'expo-image-picker';
+import { Ionicons } from '@expo/vector-icons';
 import {
   StyleSheet,
   View,
@@ -10,14 +17,22 @@ import {
   Modal,
   StatusBar,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const avatar = require('../../assets/images/avatar.png');
 
-export default function MedicoScreen() {
+function MedicoScreen() {
+  const logout = useLogout();
+  const [loading, setLoading] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [profileFeedback, setProfileFeedback] = useState('');
+  const [prescriptionLoading, setPrescriptionLoading] = useState(false);
+  const [concludeLoading, setConcludeLoading] = useState(false);
+  const [prescriptionFeedback, setPrescriptionFeedback] = useState('');
   // Estados de navegação e modais
-  const [activeTab, setActiveTab] = useState<'home' | 'pacientes' | 'perfil' | 'configuracoes'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'pacientes' | 'perfil' | 'configuracoes' | 'disponibilidade'>('home');
   const [selectedAppointment, setSelectedAppointment] = useState<any | null>(null);
   const [selectedPatient, setSelectedPatient] = useState<any | null>(null);
   
@@ -26,50 +41,72 @@ export default function MedicoScreen() {
   const [doctorNotes, setDoctorNotes] = useState('');
   
   // Perfil Profissional (Mock state)
-  const [profileName, setProfileName] = useState('Dra. Ana Silva');
-  const [councilNumber, setCouncilNumber] = useState('CRP 06/123456');
-  const [hourlyRate, setHourlyRate] = useState('200,00');
-  const [profileBio, setProfileBio] = useState('Especialista em Terapia Cognitivo-Comportamental focada em transtornos de ansiedade, depressão e burnout.');
+  const [professionalId, setProfessionalId] = useState<number | string>();
+  const [profileName, setProfileName] = useState('');
+  const [councilNumber, setCouncilNumber] = useState('');
+  const [hourlyRate, setHourlyRate] = useState('');
+  const [profileBio, setProfileBio] = useState('');
+  const [profileEmail, setProfileEmail] = useState('');
+  const [profilePhone, setProfilePhone] = useState('');
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const [dashboardStats, setDashboardStats] = useState<any>(null);
 
   // Dados estáticos mapeados
-  const appointments = [
-    {
-      id: '1',
-      patient: 'João da Silva',
-      type: 'Sessão TCC / Primeira Consulta',
-      date: '30/09/2026 às 14:00',
-      price: 'R$ 200,00',
-      img: avatar,
-      history: 'Paciente relata episódios recorrentes de ansiedade no trabalho e sintomas de burnout. Histórico sem medicações prévias.',
-      preview: 'Paciente relata episódios recorrentes de ansiedade no trabalho e sintomas...',
-    },
-    {
-      id: '2',
-      patient: 'Maria Oliveira',
-      type: 'Avaliação Neuropsicológica',
-      date: '02/10/2026 às 10:00',
-      price: 'R$ 300,00',
-      img: avatar,
-      history: 'Sessão de aplicação de testes cognitivos para investigação de foco e memória. Encaminhada por neurologista.',
-      preview: 'Sessão de aplicação de testes cognitivos para investigação de foco e memória...',
-    },
-  ];
+  const [appointments, setAppointments] = useState<any[]>([]);
 
-  const patientsList = [
-    {
-      id: '1',
-      name: 'João da Silva',
-      profession: 'Última consulta: 15/09/2026',
-      rating: '5 Atendimentos realizados',
-      price: 'Plano: Individual',
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [profile, dashboard, appointmentData] = await Promise.all([
+          api<{ success: boolean; profile: any }>('/api/v1/profile/me'),
+          api<{ success: boolean; stats: any }>('/api/v1/doctor/dashboard'),
+          api<{ success: boolean; appointments: any[] }>('/api/v1/doctor/appointments'),
+        ]);
+        setProfessionalId(profile.profile?.id);
+        setProfileName(profile.profile?.nome || '');
+        setCouncilNumber(profile.profile?.registro || '');
+        setHourlyRate(String(profile.profile?.valor_hora ?? ''));
+        setProfileBio(profile.profile?.descricao || '');
+        setProfileEmail(profile.profile?.email || '');
+        setProfilePhone(profile.profile?.telefone || '');
+        setProfilePhoto(profile.profile?.foto || null);
+        setDashboardStats(dashboard.stats || null);
+        setAppointments(appointmentData.appointments.map((item) => ({
+          id: item.id,
+          patient: item.paciente_nome,
+          type: 'Consulta',
+          date: new Date(item.data_hora).toLocaleString('pt-BR'),
+          price: `R$ ${Number(item.valor).toFixed(2)}`,
+          img: avatar,
+          history: item.anotacoes || 'Sem histórico registrado.',
+          preview: item.anotacoes || 'Consulta agendada.',
+          status: item.status,
+        })));
+      } catch (error) {
+        if (error instanceof ApiError) Alert.alert('Erro', error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  const reloadAppointments = async () => {
+    const result = await api<{ success: boolean; appointments: any[] }>('/api/v1/doctor/appointments');
+    setAppointments(result.appointments.map((item) => ({
+      id: item.id,
+      patient: item.paciente_nome,
+      type: 'Consulta',
+      date: new Date(item.data_hora).toLocaleString('pt-BR'),
+      price: `R$ ${Number(item.valor).toFixed(2)}`,
       img: avatar,
-      bio: 'Paciente em acompanhamento semanal. Evolução positiva no manejo de crises de ansiedade. Mantém diário de pensamentos.',
-      consultations: [
-        { date: '15/09/2026 - 14:00', type: 'Sessão TCC / Acompanhamento', notes: 'Paciente relatou melhora nos episódios de ansiedade após início do diário de pensamentos.' },
-        { date: '08/09/2026 - 14:00', type: 'Sessão TCC / Acompanhamento', notes: 'Identificados gatilhos de estresse no ambiente de trabalho.' }
-      ]
-    }
-  ];
+      history: item.anotacoes || 'Sem histórico registrado.',
+      preview: item.anotacoes || 'Consulta agendada.',
+      status: item.status,
+    })));
+  };
+
+  const patientsList: any[] = [];
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -78,22 +115,39 @@ export default function MedicoScreen() {
       {/* Header Fixo */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={styles.logo}>MinhaLogo | Profissional</Text>
+          <TouchableOpacity onPress={() => setMenuOpen(true)} accessibilityLabel="Abrir menu">
+            <Ionicons aria-hidden name="menu" size={26} color={palette.white} />
+          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Image
+              source={require("../../assets/images/logo.png")}
+              style={{ width: 38, height: 38 }}
+              resizeMode="contain"
+            />
+            <Text style={styles.logo}>EcliPsi | Profissional</Text>
+          </View>
         </View>
         <View style={styles.headerRight}>
           <TextInput
             style={styles.searchInput}
             placeholder="Pesquisar pacientes..."
-            placeholderTextColor="#888"
+            placeholderTextColor={palette.muted}
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
-          <Image source={avatar} style={styles.profileImg} />
+          <Image source={profilePhoto ? { uri: profilePhoto } : avatar} style={styles.profileImg} />
         </View>
       </View>
 
       {/* Conteúdo Dinâmico Baseado na Aba Ativa */}
       <ScrollView contentContainerStyle={styles.contentContainer}>
+        {loading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={palette.indigo} />
+            <Text style={styles.loadingText}>Carregando dados...</Text>
+          </View>
+        ) : (
+          <>
         
         {/* ABA: MINHA AGENDA */}
         {activeTab === 'home' && (
@@ -112,11 +166,11 @@ export default function MedicoScreen() {
                   <View style={styles.cardInfo}>
                     <Text style={styles.cardTitle}>{item.patient}</Text>
                     <Text style={styles.specialty}>{item.type}</Text>
-                    <Text style={styles.cardDate}>🗓 {item.date}</Text>
-                    <Text style={styles.cardPrice}>💰 {item.price}</Text>
+                    <Text style={styles.cardDate}><Ionicons aria-hidden name="calendar-outline" size={16} color={palette.indigo} /> {item.date}</Text>
+                    <Text style={styles.cardPrice}><Ionicons aria-hidden name="wallet-outline" size={16} color={palette.wine} /> {item.price}</Text>
                     <Text style={styles.cardPreview} numberOfLines={2}>{item.preview}</Text>
                     <View style={styles.viewBtn}>
-                      <Text style={styles.btnText}>Ver prontuário / Laudo</Text>
+                      <Text style={styles.btnText}><Ionicons aria-hidden name="document-text-outline" size={17} color={palette.cream} /> Ver prontuário / Laudo</Text>
                     </View>
                   </View>
                 </TouchableOpacity>
@@ -155,6 +209,12 @@ export default function MedicoScreen() {
         )}
 
         {/* ABA: PERFIL PROFISSIONAL */}
+        {activeTab === 'disponibilidade' && (
+          professionalId != null
+            ? <AvailabilityPanel professionalId={professionalId} />
+            : <Text style={styles.pageTitle}>Perfil profissional indisponível.</Text>
+        )}
+
         {activeTab === 'perfil' && (
           <View>
             <View style={styles.profileHeaderContainer}>
@@ -163,63 +223,24 @@ export default function MedicoScreen() {
                 style={styles.settingsNavBtn} 
                 onPress={() => setActiveTab('configuracoes')}
               >
-                <Text style={styles.settingsNavBtnText}>⚙️ Configurações</Text>
+                <Text style={styles.settingsNavBtnText}><Ionicons aria-hidden name="settings-outline" size={16} color={palette.indigo} /> Configurações</Text>
               </TouchableOpacity>
             </View>
 
             {/* Resumo de Ganhos */}
             <View style={styles.earningsContainer}>
-              <Text style={styles.earningsTitle}>📈 Resumo de Ganhos</Text>
+              <Text style={styles.earningsTitle}><Ionicons aria-hidden name="stats-chart-outline" size={16} color={palette.indigo} /> Resumo de Ganhos</Text>
               <View style={styles.earningsGrid}>
                 <View style={styles.earningsCard}>
-                  <Text style={styles.earningsLabel}>Ganhos neste Mês (Setembro)</Text>
-                  <Text style={styles.earningsValue}>R$ 4.800,00</Text>
-                  <Text style={styles.earningsSubtext}>+12% em relação ao mês anterior</Text>
+                  <Text style={styles.earningsLabel}>Ganhos Realizados</Text>
+                  <Text style={styles.earningsValue}>R$ {dashboardStats ? Number(dashboardStats.faturamento || 0).toFixed(2) : '0.00'}</Text>
+                  <Text style={styles.earningsSubtext}>{dashboardStats?.consultas_pagantes || 0} consultas pagantes</Text>
                 </View>
                 <View style={[styles.earningsCard, styles.earningsCardHighlight]}>
-                  <Text style={[styles.earningsLabel, styles.earningsLabelHighlight]}>Ganhos Acumulados no Ano (2026)</Text>
-                  <Text style={[styles.earningsValue, styles.earningsValueHighlight]}>R$ 52.400,00</Text>
-                  <Text style={[styles.earningsSubtext, styles.earningsSubtextHighlight]}>262 consultas realizadas</Text>
+                  <Text style={[styles.earningsLabel, styles.earningsLabelHighlight]}>Próximas / Realizadas</Text>
+                  <Text style={[styles.earningsValue, styles.earningsValueHighlight]}>{dashboardStats?.agendadas || 0} / {dashboardStats?.realizadas || 0}</Text>
+                  <Text style={[styles.earningsSubtext, styles.earningsSubtextHighlight]}>Consultas reais</Text>
                 </View>
-              </View>
-            </View>
-
-            {/* Formulário de Perfil */}
-            <View style={styles.settingsForm}>
-              <View style={styles.settingsGroup}>
-                <View style={styles.profileAvatarWrapper}>
-                  <Image source={avatar} style={styles.profileAvatarLg} />
-                </View>
-
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Nome Completo</Text>
-                  <TextInput style={styles.input} value={profileName} onChangeText={setProfileName} />
-                </View>
-
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Nº do Registro (CRP / CRM)</Text>
-                  <TextInput style={styles.input} value={councilNumber} onChangeText={setCouncilNumber} />
-                </View>
-
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Valor da Consulta (R$ / hora)</Text>
-                  <TextInput style={styles.input} value={hourlyRate} onChangeText={setHourlyRate} />
-                </View>
-
-                <View style={styles.formGroup}>
-                  <Text style={styles.label}>Apresentação e Abordagem Terapêutica</Text>
-                  <TextInput 
-                    style={[styles.input, styles.textArea]} 
-                    multiline 
-                    numberOfLines={4} 
-                    value={profileBio} 
-                    onChangeText={setProfileBio} 
-                  />
-                </View>
-
-                <TouchableOpacity style={styles.saveSettingsBtn} onPress={() => Alert.alert('Perfil atualizado com sucesso!')}>
-                  <Text style={styles.btnText}>Salvar Perfil Profissional</Text>
-                </TouchableOpacity>
               </View>
             </View>
           </View>
@@ -237,24 +258,110 @@ export default function MedicoScreen() {
 
             <View style={styles.settingsForm}>
               <View style={styles.settingsGroup}>
-                <Text style={styles.sectionSubTitle}>Acesso Profissional</Text>
+                <View style={styles.profileAvatarWrapper}>
+                  <Image source={profilePhoto ? { uri: profilePhoto } : avatar} style={styles.profileAvatarLg} />
+                  <TouchableOpacity
+                    style={styles.saveSettingsBtn}
+                    onPress={async () => {
+                      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                      if (!permission.granted) {
+                        setProfileFeedback('Permissão para acessar fotos foi negada.');
+                        return;
+                      }
+                      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.7, base64: true });
+                      if (!result.canceled && result.assets[0]) {
+                        const asset = result.assets[0];
+                        setProfilePhoto(asset.base64 ? `data:${asset.mimeType || 'image/jpeg'};base64,${asset.base64}` : asset.uri);
+                      }
+                    }}
+                  >
+                    <Text style={styles.btnText}>Alterar Foto</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Nome Completo</Text>
+                  <TextInput style={styles.input} value={profileName} onChangeText={setProfileName} />
+                </View>
                 <View style={styles.formGroup}>
                   <Text style={styles.label}>E-mail Profissional</Text>
-                  <TextInput style={styles.input} defaultValue="dra.anasilva@saudemental.com" />
+                  <TextInput style={styles.input} value={profileEmail} onChangeText={setProfileEmail} keyboardType="email-address" autoCapitalize="none" />
                 </View>
                 <View style={styles.formGroup}>
                   <Text style={styles.label}>Telefone / WhatsApp</Text>
-                  <TextInput style={styles.input} defaultValue="(11) 99999-8888" />
+                  <TextInput
+                    style={styles.input}
+                    value={profilePhone}
+                    onChangeText={(value) => setProfilePhone(value.replace(/\D/g, '').slice(0, 11))}
+                    keyboardType="phone-pad"
+                    maxLength={11}
+                  />
                 </View>
-                <TouchableOpacity style={styles.saveSettingsBtn} onPress={() => Alert.alert('Configurações salvas!')}>
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Registro CRP/CRM</Text>
+                  <TextInput style={styles.input} value={councilNumber} onChangeText={setCouncilNumber} maxLength={15} />
+                </View>
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Valor da Consulta (R$)</Text>
+                  <TextInput style={styles.input} value={hourlyRate} onChangeText={setHourlyRate} keyboardType="decimal-pad" />
+                </View>
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Abordagem / Descrição</Text>
+                  <TextInput style={[styles.input, styles.textArea]} value={profileBio} onChangeText={setProfileBio} multiline numberOfLines={4} />
+                </View>
+                {profileFeedback ? <Text accessibilityRole="alert" style={styles.profileFeedback}>{profileFeedback}</Text> : null}
+                <TouchableOpacity
+                  style={styles.saveSettingsBtn}
+                  onPress={async () => {
+                    try {
+                      await api('/api/v1/profile/me', {
+                        method: 'PATCH',
+                        body: JSON.stringify({
+                          nome: profileName,
+                          email: profileEmail,
+                          telefone: profilePhone,
+                          registro: councilNumber,
+                          valor_hora: Number(hourlyRate.replace(',', '.')),
+                          descricao: profileBio,
+                          ...(profilePhoto ? { foto: profilePhoto } : {}),
+                        }),
+                      });
+                      setProfileFeedback('Perfil atualizado com sucesso!');
+                    } catch (error) {
+                      setProfileFeedback(error instanceof ApiError ? error.message : 'Nao foi possivel salvar.');
+                    }
+                  }}
+                >
                   <Text style={styles.btnText}>Salvar Configurações</Text>
                 </TouchableOpacity>
               </View>
             </View>
           </View>
         )}
-
+          </>
+        )}
       </ScrollView>
+
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <View style={styles.menuBackdrop}>
+          <TouchableOpacity style={styles.menuOverlay} onPress={() => setMenuOpen(false)} />
+          <View style={styles.menuPanel}>
+            {[
+              { label: 'Resumo', tab: 'home' as const },
+              { label: 'Pacientes', tab: 'pacientes' as const },
+              { label: 'Minha Disponibilidade', tab: 'disponibilidade' as const },
+              { label: 'Perfil', tab: 'perfil' as const },
+              { label: 'Configurações', tab: 'configuracoes' as const },
+            ].map((item) => (
+              <TouchableOpacity key={item.label} style={styles.menuItem} onPress={() => { setActiveTab(item.tab); setMenuOpen(false); }}>
+                <Text style={styles.menuItemText}>{item.label}</Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Sair" style={styles.menuItem} onPress={logout}>
+              <Text style={styles.menuItemText}><Ionicons aria-hidden name="log-out-outline" size={17} color={palette.wine} /> Sair</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Modal de Detalhes da Consulta / Prontuário */}
       <Modal visible={!!selectedAppointment} animationType="slide" transparent={true}>
@@ -291,15 +398,63 @@ export default function MedicoScreen() {
                   value={doctorNotes}
                   onChangeText={setDoctorNotes}
                 />
+                {prescriptionFeedback ? (
+                  <Text accessibilityRole="alert" style={styles.profileFeedback}>{prescriptionFeedback}</Text>
+                ) : null}
 
                 <TouchableOpacity 
                   style={[styles.saveSettingsBtn, { marginTop: 12 }]} 
-                  onPress={() => {
-                    Alert.alert('Anotações salvas com sucesso!');
-                    setSelectedAppointment(null);
+                  disabled={prescriptionLoading}
+                  onPress={async () => {
+                    setPrescriptionLoading(true);
+                    setPrescriptionFeedback('');
+                    try {
+                      await api(`/api/v1/appointments/${selectedAppointment.id}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ anotacoes: doctorNotes }),
+                      });
+                      await reloadAppointments();
+                      setPrescriptionFeedback('Prescrição salva com sucesso!');
+                      setSelectedAppointment(null);
+                    } catch (error) {
+                      setPrescriptionFeedback(error instanceof ApiError ? error.message : 'Nao foi possivel salvar.');
+                    } finally {
+                      setPrescriptionLoading(false);
+                    }
                   }}
                 >
-                  <Text style={styles.btnText}>Salvar no Prontuário</Text>
+                  {prescriptionLoading ? (
+                    <><ActivityIndicator size="small" color={palette.white} /><Text style={styles.btnText}>Salvando...</Text></>
+                  ) : (
+                    <Text style={styles.btnText}><Ionicons aria-hidden name="document-text-outline" size={17} color={palette.cream} /> Salvar no Prontuário</Text>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveSettingsBtn, { marginTop: 8 }]}
+                  disabled={concludeLoading}
+                  onPress={async () => {
+                    setConcludeLoading(true);
+                    setPrescriptionFeedback('');
+                    try {
+                      await api(`/api/v1/appointments/${selectedAppointment.id}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ status: 'concluida', anotacoes: doctorNotes }),
+                      });
+                      await reloadAppointments();
+                      setPrescriptionFeedback('Consulta concluída e prescrição enviada!');
+                      setSelectedAppointment(null);
+                    } catch (error) {
+                      setPrescriptionFeedback(error instanceof ApiError ? error.message : 'Nao foi possivel concluir.');
+                    } finally {
+                      setConcludeLoading(false);
+                    }
+                  }}
+                >
+                  {concludeLoading ? (
+                    <><ActivityIndicator size="small" color={palette.white} /><Text style={styles.btnText}>Concluindo...</Text></>
+                  ) : (
+                    <Text style={styles.btnText}>Concluir Consulta</Text>
+                  )}
                 </TouchableOpacity>
               </ScrollView>
             )}
@@ -336,7 +491,7 @@ export default function MedicoScreen() {
                   <View key={index} style={styles.consultationHistoryCard}>
                     <View style={styles.consultationHistoryHeader}>
                       <Text style={styles.consultationHistoryType}>{c.type}</Text>
-                      <Text style={styles.consultationHistoryDate}>🗓 {c.date}</Text>
+                      <Text style={styles.consultationHistoryDate}><Ionicons aria-hidden name="calendar-outline" size={16} color={palette.indigo} /> {c.date}</Text>
                     </View>
                     <Text style={styles.consultationHistoryNotes}>{c.notes}</Text>
                   </View>
@@ -350,22 +505,33 @@ export default function MedicoScreen() {
       {/* Navegação Inferior (Bottom Navigation) Padrão Mobile */}
       <View style={styles.bottomNav}>
         <TouchableOpacity 
+          accessibilityRole="button" accessibilityLabel="Agenda"
           style={[styles.bottomNavItem, activeTab === 'home' && styles.bottomNavActive]} 
           onPress={() => setActiveTab('home')}
         >
-          <Text style={styles.bottomNavIcon}>📅</Text>
+          <Ionicons aria-hidden name="calendar-outline" size={22} color={palette.cream} />
         </TouchableOpacity>
         <TouchableOpacity 
+          accessibilityRole="button" accessibilityLabel="Pacientes"
           style={[styles.bottomNavItem, activeTab === 'pacientes' && styles.bottomNavActive]} 
           onPress={() => setActiveTab('pacientes')}
         >
-          <Text style={styles.bottomNavIcon}>👥</Text>
+          <Ionicons aria-hidden name="people-outline" size={22} color={palette.cream} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Minha Disponibilidade"
+          style={[styles.bottomNavItem, activeTab === 'disponibilidade' && styles.bottomNavActive]}
+          onPress={() => setActiveTab('disponibilidade')}
+        >
+          <Ionicons aria-hidden name="time-outline" size={22} color={palette.cream} />
         </TouchableOpacity>
         <TouchableOpacity 
+          accessibilityRole="button" accessibilityLabel="Perfil profissional"
           style={[styles.bottomNavItem, activeTab === 'perfil' && styles.bottomNavActive]} 
           onPress={() => setActiveTab('perfil')}
         >
-          <Text style={styles.bottomNavIcon}>🩺</Text>
+          <Ionicons aria-hidden name="person-circle-outline" size={22} color={palette.cream} />
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -373,14 +539,29 @@ export default function MedicoScreen() {
 }
 
 // Estilização adaptada para React Native (StyleSheet)
+const GuardedScreen = withRouteGuard(MedicoScreen, 'medico');
+
+export default function Route() {
+  return (
+    <>
+      <Head>
+        <title>EcliPsi — Painel Profissional</title>
+      </Head>
+      <GuardedScreen />
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#f5dfff',
+    backgroundColor: palette.cream,
   },
   header: {
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.indigo,
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -388,25 +569,31 @@ const styles = StyleSheet.create({
   },
   headerLeft: {
     flexDirection: 'row',
+    maxWidth: '100%',
     alignItems: 'center',
   },
   headerRight: {
     flexDirection: 'row',
+    marginLeft: 'auto',
     alignItems: 'center',
     gap: 12,
+  },
+  logoImage: {
+    width: 40,
+    height: 40,
   },
   logo: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#ffffff',
+    color: palette.white,
   },
   searchInput: {
-    backgroundColor: '#f5dfff',
+    backgroundColor: palette.cream,
     borderRadius: 20,
     paddingHorizontal: 12,
     paddingVertical: 6,
     fontSize: 14,
-    color: '#333333',
+    color: palette.indigo,
     width: 140,
   },
   profileImg: {
@@ -421,34 +608,34 @@ const styles = StyleSheet.create({
   pageTitle: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#333333',
+    color: palette.indigo,
     marginBottom: 4,
   },
   pageSubtitle: {
     fontSize: 14,
-    color: '#666666',
+    color: palette.muted,
     marginBottom: 16,
   },
   cardsGrid: {
     gap: 16,
   },
   appointmentCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: palette.indigo,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
   doctorCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     borderRadius: 12,
     padding: 16,
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: palette.indigo,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
@@ -467,39 +654,41 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333333',
+    color: palette.indigo,
     marginBottom: 4,
   },
   specialty: {
     fontSize: 12,
-    color: '#666666',
+    color: palette.muted,
     fontStyle: 'italic',
     marginBottom: 6,
   },
   cardDate: {
     fontSize: 13,
-    color: '#444444',
+    color: palette.muted,
     marginBottom: 2,
   },
   cardPrice: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: '#2e7d32',
+    color: palette.indigo,
     marginBottom: 6,
   },
   cardPreview: {
     fontSize: 12,
-    color: '#666666',
+    color: palette.muted,
     textAlign: 'center',
     marginBottom: 12,
   },
   cardRating: {
     fontSize: 12,
-    color: '#2e7d32',
+    color: palette.indigo,
     marginBottom: 6,
   },
   viewBtn: {
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.magenta,
+    borderBottomWidth: 3,
+    borderBottomColor: palette.wine,
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 20,
@@ -507,7 +696,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   viewDoctorBtn: {
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.magenta,
+    borderBottomWidth: 3,
+    borderBottomColor: palette.wine,
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 20,
@@ -515,9 +706,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   btnText: {
-    color: '#ffffff',
+    color: palette.white,
     fontWeight: 'bold',
-    fontSize: 13,
+    fontSize: 19,
   },
   bottomNav: {
     position: 'absolute',
@@ -525,7 +716,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 60,
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.indigo,
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
@@ -538,9 +729,8 @@ const styles = StyleSheet.create({
   },
   bottomNavActive: {
     opacity: 1,
-  },
-  bottomNavIcon: {
-    fontSize: 22,
+    backgroundColor: palette.wine,
+    borderRadius: 12,
   },
   modalBackdrop: {
     flex: 1,
@@ -549,7 +739,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     borderRadius: 12,
     padding: 20,
     width: '90%',
@@ -562,7 +752,7 @@ const styles = StyleSheet.create({
   modalCloseText: {
     fontSize: 22,
     fontWeight: 'bold',
-    color: '#333',
+    color: palette.indigo,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -578,25 +768,25 @@ const styles = StyleSheet.create({
   modalPatientName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
+    color: palette.indigo,
   },
   modalSubHeader: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#333',
+    color: palette.indigo,
     marginTop: 12,
     marginBottom: 4,
   },
   feedbackTextContainer: {
-    backgroundColor: '#f9f9f9',
+    backgroundColor: palette.neutral,
     padding: 10,
     borderRadius: 8,
     borderLeftWidth: 4,
-    borderLeftColor: '#7500a8',
+    borderLeftColor: palette.indigo,
   },
   feedbackText: {
     fontSize: 13,
-    color: '#333',
+    color: palette.indigo,
   },
   profileHeaderContainer: {
     flexDirection: 'row',
@@ -606,13 +796,13 @@ const styles = StyleSheet.create({
   },
   settingsNavBtn: {
     borderWidth: 1,
-    borderColor: '#7500a8',
+    borderColor: palette.indigo,
     borderRadius: 20,
     paddingVertical: 6,
     paddingHorizontal: 12,
   },
   settingsNavBtnText: {
-    color: '#7500a8',
+    color: palette.indigo,
     fontWeight: 'bold',
     fontSize: 12,
   },
@@ -621,13 +811,13 @@ const styles = StyleSheet.create({
   },
   btnBack: {
     borderWidth: 1,
-    borderColor: '#7500a8',
+    borderColor: palette.indigo,
     borderRadius: 20,
     paddingVertical: 6,
     paddingHorizontal: 12,
   },
   btnBackText: {
-    color: '#7500a8',
+    color: palette.indigo,
     fontWeight: 'bold',
     fontSize: 12,
   },
@@ -637,62 +827,62 @@ const styles = StyleSheet.create({
   earningsTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#58007e',
+    color: palette.indigo,
     marginBottom: 10,
   },
   earningsGrid: {
     gap: 12,
   },
   earningsCard: {
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     borderRadius: 12,
     padding: 16,
     borderLeftWidth: 4,
-    borderLeftColor: '#7500a8',
-    shadowColor: '#000',
+    borderLeftColor: palette.indigo,
+    shadowColor: palette.indigo,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     elevation: 2,
   },
   earningsCardHighlight: {
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.indigo,
     borderLeftWidth: 0,
   },
   earningsLabel: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#666',
+    color: palette.muted,
     marginBottom: 4,
   },
   earningsLabelHighlight: {
-    color: '#e2c1f7',
+    color: palette.salmon,
   },
   earningsValue: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#7500a8',
+    color: palette.indigo,
     marginBottom: 2,
   },
   earningsValueHighlight: {
-    color: '#ffffff',
+    color: palette.white,
   },
   earningsSubtext: {
     fontSize: 11,
-    color: '#2e7d32',
+    color: palette.indigo,
     fontWeight: 'bold',
   },
   earningsSubtextHighlight: {
-    color: '#f5dfff',
+    color: palette.cream,
     fontWeight: 'normal',
   },
   settingsForm: {
     gap: 16,
   },
   settingsGroup: {
-    backgroundColor: '#ffffff',
+    backgroundColor: palette.white,
     borderRadius: 12,
     padding: 16,
-    shadowColor: '#000',
+    shadowColor: palette.indigo,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     elevation: 2,
@@ -701,7 +891,7 @@ const styles = StyleSheet.create({
   sectionSubTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#333',
+    color: palette.indigo,
     marginBottom: 4,
   },
   formGroup: {
@@ -710,16 +900,16 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: '#444',
+    color: palette.muted,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: palette.border,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
     fontSize: 14,
-    backgroundColor: '#fff',
+    backgroundColor: palette.white,
   },
   textArea: {
     height: 80,
@@ -734,19 +924,21 @@ const styles = StyleSheet.create({
     height: 100,
     borderRadius: 50,
     borderWidth: 3,
-    borderColor: '#7500a8',
+    borderColor: palette.indigo,
   },
   saveSettingsBtn: {
-    backgroundColor: '#7500a8',
+    backgroundColor: palette.magenta,
+    borderBottomWidth: 3,
+    borderBottomColor: palette.wine,
     borderRadius: 20,
     paddingVertical: 10,
     alignItems: 'center',
     marginTop: 8,
   },
   consultationHistoryCard: {
-    backgroundColor: '#f9f9f9',
+    backgroundColor: palette.neutral,
     borderLeftWidth: 4,
-    borderLeftColor: '#7500a8',
+    borderLeftColor: palette.indigo,
     padding: 10,
     borderRadius: 6,
     marginTop: 8,
@@ -760,14 +952,58 @@ const styles = StyleSheet.create({
   consultationHistoryType: {
     fontSize: 13,
     fontWeight: 'bold',
-    color: '#7500a8',
+    color: palette.indigo,
   },
   consultationHistoryDate: {
     fontSize: 11,
-    color: '#666',
+    color: palette.muted,
   },
   consultationHistoryNotes: {
     fontSize: 12,
-    color: '#333',
+    color: palette.indigo,
+  },
+  loadingContainer: {
+    minHeight: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    color: palette.muted,
+    fontSize: 14,
+  },
+  profileFeedback: {
+    width: '100%',
+    marginVertical: 8,
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: palette.cream,
+    color: palette.indigo,
+    textAlign: 'center',
+  },
+  menuBackdrop: {
+    flex: 1,
+    flexDirection: 'row',
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.35)',
+  },
+  menuPanel: {
+    width: 280,
+    maxWidth: '80%',
+    backgroundColor: palette.white,
+    paddingTop: 32,
+    paddingHorizontal: 16,
+  },
+  menuItem: {
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.border,
+  },
+  menuItemText: {
+    color: palette.indigo,
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

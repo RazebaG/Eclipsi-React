@@ -1,153 +1,121 @@
-import { useRouter } from "expo-router";
-import {
-    Dimensions,
-    Image,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-} from "react-native";
+import { Head } from 'expo-router/head';
+import { AcademicDemoNotice } from '../components/AcademicDemoNotice';
+import { withRouteGuard } from '../components/RouteGuard';
+import { PrimaryButton } from '../components/PrimaryButton';
+import { useRouter } from 'expo-router';
+import { Image, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-const { width } = Dimensions.get("window");
+import { palette } from '../lib/palette';
 
-export default function WelcomeScreen() {
+function WelcomeScreen() {
   const router = useRouter();
-  const handleLogin = () => router.push("/auth/login");
-  const handleRegister = () => router.push("/auth/cadastro");
+  const { height } = useWindowDimensions();
+  const handleLogin = () => router.push('/auth/login');
+  const handleRegister = () => router.push('/auth/cadastro');
 
   return (
-    <View style={styles.screenContainer}>
-      {/* Fundo superior (cor clara) */}
-      <View style={styles.backgroundTop} />
+    <ScrollView style={styles.screen} contentContainerStyle={[styles.content, { minHeight: height }]}>
+      <View style={styles.brand}>
+        <Image
+          source={require('../assets/images/logo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+          accessibilityLabel="EcliPsi"
+        />
+      </View>
 
-      {/* Fundo inferior com a cor escura */}
-      <View style={styles.backgroundBottom} />
-
-      <View style={styles.container}>
-        {/* Bloco do Logotipo e Título */}
-        <View style={styles.logoTitle}>
-          <Image
-            source={require("../assets/images/logo.png")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-          <Text style={styles.title}>Cadastro</Text>
-        </View>
-
-        {/* Opções de Acesso */}
-        <View style={styles.registerOption}>
-          <TouchableOpacity
-            style={styles.optionRegister}
+      <View style={styles.panel}>
+        <View style={styles.actions}>
+          <Text style={styles.title}>Bem-vindo</Text>
+          <PrimaryButton
+            style={styles.button}
             onPress={handleLogin}
-            activeOpacity={0.8}
           >
             <Text style={styles.buttonText}>Fazer login</Text>
-          </TouchableOpacity>
+          </PrimaryButton>
 
-          <TouchableOpacity
-            style={styles.optionRegister}
+          <PrimaryButton
+            style={styles.button}
             onPress={handleRegister}
-            activeOpacity={0.8}
           >
             <Text style={styles.buttonText}>Fazer um cadastro</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.registerP}>
-            Já fez um cadastro?{" "}
-            <Text style={styles.registerLink} onPress={handleLogin}>
-              Clique aqui!
-            </Text>
-          </Text>
+          </PrimaryButton>
+          <AcademicDemoNotice />
         </View>
       </View>
-    </View>
+    </ScrollView>
+  );
+}
+
+const GuardedScreen = withRouteGuard(WelcomeScreen);
+
+export default function Route() {
+  return (
+    <>
+      <Head>
+        <title>EcliPsi — Saúde Mental Digital</title>
+      </Head>
+      <GuardedScreen />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  screenContainer: {
+  screen: {
     flex: 1,
-    backgroundColor: "#322c8e",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: palette.cream,
   },
-  backgroundTop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: "50%",
-    backgroundColor: "#ffeec2",
-    zIndex: 1,
+  content: {
+    flexGrow: 1,
+    justifyContent: 'center',
   },
-  backgroundBottom: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    width: "100%",
-    height: "70%",
-    backgroundColor: "#322c8e",
-    borderTopLeftRadius: 80,
-    borderTopRightRadius: 80,
-    zIndex: 1,
-  },
-  container: {
-    position: "relative",
-    zIndex: 2,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "column",
-    width: "90%",
-    maxWidth: 500,
-    gap: 25,
-  },
-  logoTitle: {
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "column",
-    gap: 10,
+  brand: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 224,
+    paddingTop: 56,
+    paddingBottom: 24,
   },
   logo: {
-    width: width * 0.6,
-    height: width * 0.6,
-    maxWidth: 250,
-    maxHeight: 250,
-    borderRadius: 125,
+    width: 120,
+    height: 120,
+  },
+  panel: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: palette.indigo,
+    borderTopLeftRadius: 48,
+    borderTopRightRadius: 48,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+  actions: {
+    width: '100%',
+    maxWidth: 440,
+    gap: 14,
   },
   title: {
-    color: "#ffffff",
+    color: palette.cream,
     fontSize: 30,
-    fontWeight: "bold",
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 10,
   },
-  registerOption: {
-    justifyContent: "center",
-    alignItems: "center",
-    flexDirection: "column",
-    gap: 25,
-    width: "100%",
-  },
-  optionRegister: {
-    alignItems: "center",
-    justifyContent: "center",
-    width: "100%",
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderBottomWidth: 5,
-    borderBottomColor: "#7500a8",
-    borderRadius: 15,
-    backgroundColor: "#d196eb",
+  button: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 14,
+    borderBottomWidth: 4,
+    borderBottomColor: palette.wine,
+    borderRadius: 14,
+    backgroundColor: palette.magenta,
   },
   buttonText: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#1d0027",
-  },
-  registerP: {
-    color: "#ffffff",
-    fontSize: 14,
-  },
-  registerLink: {
-    color: "#00ffea",
-    textDecorationLine: "underline",
+    fontSize: 19,
+    fontWeight: 'bold',
+    color: palette.white,
+    textAlign: 'center',
   },
 });

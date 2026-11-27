@@ -1,21 +1,30 @@
+import { Head } from 'expo-router/head';
+import { AcademicDemoNotice } from '../../components/AcademicDemoNotice';
+import { getVerifiedRole, profileRoutes } from '../../lib/auth';
+import { withRouteGuard } from '../../components/RouteGuard';
+import { PrimaryButton } from '../../components/PrimaryButton';
+import { FormInput } from '../../components/FormInput';
+import { palette } from '../../lib/palette';
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { api, ApiError } from "../../lib/api";
+import { api, ApiError, setAuthToken } from "../../lib/api";
 import {
-    Alert,
+    ActivityIndicator,
     Image,
+    ScrollView,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from "react-native";
 
-export default function LoginScreen() {
+function LoginScreen() {
   const router = useRouter();
   // Estados para capturar os inputs do formulário
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [feedback, setFeedback] = useState("");
 
   // Função auxiliar para validar o formato do e-mail
   const validarEmail = (emailStr: string) => {
@@ -25,17 +34,19 @@ export default function LoginScreen() {
 
   // Lógica de submissão e autenticação adaptada do api.js e script.js
   const handleLogin = async () => {
+    setFeedback("");
     const trimmedEmail = email.trim();
 
     if (!validarEmail(trimmedEmail)) {
-      Alert.alert("Atenção", "Por favor, insira um e-mail válido.");
+      setFeedback("Por favor, insira um e-mail válido.");
       return;
     }
 
     if (!password) {
-      Alert.alert("Atenção", "Por favor, digite sua senha.");
+      setFeedback("Por favor, digite sua senha.");
       return;
     }
+    setLoading(true);
 
     const payload = {
       email: trimmedEmail,
@@ -46,44 +57,55 @@ export default function LoginScreen() {
       const data = await api<{
         success?: boolean;
         message?: string;
-        user?: { tipo?: string; role?: string };
-      }>("/api/login", {
+        token?: string;
+        access_token?: string;
+      }>("/api/v1/auth/login", {
         method: "POST",
         body: JSON.stringify(payload),
       });
       if (data.success) {
-        const tipo = String(data.user?.tipo ?? data.user?.role ?? "").toLowerCase();
-        if (tipo.includes("admin")) router.replace("/profile/admin");
-        else if (tipo.includes("med") || tipo.includes("doctor")) router.replace("/profile/medico");
-        else router.replace("/profile/user");
+        const token = data.token ?? data.access_token;
+        if (!token) {
+          throw new ApiError("O servidor nao retornou o token.", 401);
+        }
+        const role = await getVerifiedRole(token);
+        await setAuthToken(token);
+        router.replace(profileRoutes[role]);
       } else {
-        Alert.alert("Erro", data.message || "E-mail ou senha incorretos.");
+        setFeedback(data.message || "E-mail ou senha incorretos.");
       }
     } catch (error) {
-      console.error("Erro na requisição de login:", error);
-      Alert.alert(
-        "Erro",
-        error instanceof ApiError ? error.message : "Ocorreu um erro ao conectar ao servidor.",
-      );
+      setFeedback(error instanceof Error ? error.message : "Ocorreu um erro ao conectar ao servidor.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <View style={styles.mainContainer}>
       {/* Fundo superior (cor clara) */}
-      <View style={styles.backgroundTop} />
+      <View pointerEvents="none" style={styles.backgroundTop} />
 
       {/* Fundo inferior com curva (cor escura) */}
-      <View style={styles.backgroundBottom} />
+      <View pointerEvents="none" style={styles.backgroundBottom} />
 
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContainer}
+        showsVerticalScrollIndicator
+        keyboardShouldPersistTaps="handled"
+      >
       <View style={styles.container}>
         {/* Cabeçalho com Logo e Título */}
         <View style={styles.logoTitle}>
-          <Image
-            source={require("../../assets/images/logo.png")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
+          <View style={styles.brandRow}>
+            <Image
+              source={require("../../assets/images/logo.png")}
+              style={styles.brandBadge}
+              resizeMode="contain"
+            />
+            <Text style={styles.brandTitle}>EcliPsi</Text>
+          </View>
           <Text style={styles.title}>Login</Text>
         </View>
 
@@ -91,10 +113,10 @@ export default function LoginScreen() {
         <View style={styles.register}>
           <View style={styles.registerForm}>
             <View style={styles.sentenceLine}>
-              <TextInput
-                style={styles.registerInput}
+              <FormInput
+                accessibilityLabel="Digite seu e-mail"
                 placeholder="Digite seu e-mail"
-                placeholderTextColor="#999"
+                placeholderTextColor={palette.muted}
                 keyboardType="email-address"
                 autoCapitalize="none"
                 value={email}
@@ -103,10 +125,10 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.sentenceLine}>
-              <TextInput
-                style={styles.registerInput}
+              <FormInput
+                accessibilityLabel="Digite sua senha"
                 placeholder="Digite sua senha"
-                placeholderTextColor="#999"
+                placeholderTextColor={palette.muted}
                 secureTextEntry
                 value={password}
                 onChangeText={setPassword}
@@ -114,16 +136,27 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.btnLine}>
-              <TouchableOpacity
+              {feedback ? (
+                <Text accessibilityRole="alert" style={styles.feedback}>{feedback}</Text>
+              ) : null}
+              <PrimaryButton
                 style={styles.registerBtn}
                 onPress={handleLogin}
+                disabled={loading}
               >
-                <Text style={styles.btnTextBold}>Entrar</Text>
-              </TouchableOpacity>
+                {loading ? (
+                  <View style={styles.loadingRow}>
+                    <ActivityIndicator color={palette.white} />
+                    <Text style={styles.btnTextBold}>Entrando...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.btnTextBold}>Entrar</Text>
+                )}
+              </PrimaryButton>
 
               <TouchableOpacity
                 style={styles.backBtn}
-                onPress={() => router.back()}
+                onPress={() => router.replace("/")}
               >
                 <Text style={styles.backBtnText}>Voltar</Text>
               </TouchableOpacity>
@@ -140,17 +173,47 @@ export default function LoginScreen() {
             </View>
           </View>
         </View>
+        <AcademicDemoNotice />
       </View>
+      </ScrollView>
     </View>
+  );
+}
+
+const GuardedScreen = withRouteGuard(LoginScreen);
+
+export default function Route() {
+  return (
+    <>
+      <Head>
+        <title>EcliPsi — Entrar</title>
+      </Head>
+      <GuardedScreen />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   mainContainer: {
     flex: 1,
-    backgroundColor: "#322c8e",
+    minHeight: "100%",
+    backgroundColor: palette.indigo,
     alignItems: "center",
     justifyContent: "center",
+  },
+  scrollView: {
+    flex: 1,
+    width: "100%",
+    position: "relative",
+    zIndex: 10,
+  },
+  scrollContainer: {
+    flexGrow: 1,
+    minHeight: "100%",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    paddingTop: 24,
+    paddingBottom: 32,
   },
   backgroundTop: {
     position: "absolute",
@@ -158,8 +221,8 @@ const styles = StyleSheet.create({
     left: 0,
     width: "100%",
     height: "50%",
-    backgroundColor: "#ffeec2",
-    zIndex: 1,
+    backgroundColor: palette.cream,
+    zIndex: 0,
   },
   backgroundBottom: {
     position: "absolute",
@@ -167,21 +230,30 @@ const styles = StyleSheet.create({
     left: 0,
     width: "100%",
     height: "70%",
-    backgroundColor: "#322c8e",
-    borderTopLeftRadius: 150, // Adaptação nativa da curva CSS
-    borderTopRightRadius: 150,
-    zIndex: 1,
+    backgroundColor: palette.indigo,
+    borderTopLeftRadius: 48,
+    borderTopRightRadius: 48,
+    zIndex: 0,
   },
   container: {
     position: "relative",
-    zIndex: 2,
+    zIndex: 10,
+    backgroundColor: palette.white,
+    padding: 20,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "column",
     maxWidth: 500,
     width: "90%",
     gap: 25,
-    borderRadius: 15,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: palette.border,
+    shadowColor: palette.indigo,
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   logoTitle: {
     alignItems: "center",
@@ -190,14 +262,29 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   logo: {
-    width: 250,
-    height: 250,
-    borderRadius: 125,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+  },
+  brandTitle: {
+    color: palette.indigo,
+    fontSize: 32,
+    fontWeight: "900",
+  },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  brandBadge: {
+    width: 44,
+    height: 44,
   },
   title: {
-    color: "white",
+    color: palette.indigo,
     fontSize: 30,
     fontWeight: "bold",
+    textAlign: "center",
   },
   register: {
     alignItems: "center",
@@ -208,7 +295,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     flexDirection: "column",
-    gap: 25,
+    gap: 16,
     width: "100%",
   },
   sentenceLine: {
@@ -223,39 +310,44 @@ const styles = StyleSheet.create({
     gap: 10,
     width: "100%",
   },
-  registerInput: {
-    padding: 12,
-    width: "100%",
-    borderWidth: 0,
-    borderBottomWidth: 2,
-    borderBottomColor: "white",
-    borderRadius: 15,
-    backgroundColor: "white",
-    fontSize: 16,
-    color: "#333",
-  },
   registerBtn: {
     alignItems: "center",
     justifyContent: "center",
     padding: 12,
     borderWidth: 0,
     borderBottomWidth: 5,
-    borderBottomColor: "#7500a8",
+    borderBottomColor: palette.wine,
     borderRadius: 15,
-    backgroundColor: "#d196eb",
+    backgroundColor: palette.magenta,
     width: "100%",
   },
   btnTextBold: {
     fontWeight: "bold",
-    color: "#1d0027",
-    fontSize: 16,
+    color: palette.white,
+    fontSize: 19,
+    textAlign: "center",
+  },
+  feedback: {
+    width: "100%",
+    borderRadius: 10,
+    padding: 10,
+    textAlign: "center",
+    color: palette.wine,
+    backgroundColor: palette.salmon,
+    fontWeight: "600",
+  },
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
   registerP: {
-    color: "white",
+    color: "#334155",
     marginTop: 5,
   },
   registerLink: {
-    color: "rgb(0, 255, 234)",
+    color: palette.wine,
     fontWeight: "bold",
   },
   backBtn: {
@@ -263,14 +355,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 12,
     width: "100%",
-    borderWidth: 0,
-    borderBottomWidth: 5,
-    borderBottomColor: "#4a4a4a",
+    borderWidth: 1,
+    borderColor: palette.border,
     borderRadius: 15,
-    backgroundColor: "#a8a8a8",
+    backgroundColor: palette.neutral,
   },
   backBtnText: {
-    color: "#1d0027",
+    color: palette.indigo,
     fontWeight: "bold",
     fontSize: 16,
   },

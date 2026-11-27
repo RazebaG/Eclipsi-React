@@ -1,18 +1,22 @@
+import { Head } from 'expo-router/head';
+import { withRouteGuard } from '../../components/RouteGuard';
+import { PrimaryButton } from '../../components/PrimaryButton';
+import { FormInput } from '../../components/FormInput';
+import { palette } from '../../lib/palette';
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { api, ApiError } from "../../lib/api";
+import { api, ApiError, setAuthToken } from "../../lib/api";
 import {
-    Alert,
+    ActivityIndicator,
     Image,
     ScrollView,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from "react-native";
 
-export default function CadastroMedicoScreen() {
+function CadastroMedicoScreen() {
   const router = useRouter();
   // Estados para cada campo do formulário
   const [name, setName] = useState("");
@@ -24,22 +28,52 @@ export default function CadastroMedicoScreen() {
   const [description, setDescription] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [feedback, setFeedback] = useState<{ text: string; type: "error" | "success" } | null>(null);
+  const specialties = ["Psicólogo(a)", "Psiquiatra", "Psicanalista", "Neuropsicólogo(a)"];
+
+  const formatPhone = (value: string) => {
+    const digits = value.replace(/\D/g, "").slice(0, 11);
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+    if (digits.length <= 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  };
 
   // Lógica de envio do formulário adaptada do api.js
   const handleSubmit = async () => {
+    setFeedback(null);
     if (!name.trim() || !email.trim() || !councilNumber.trim() || !password) {
-      Alert.alert("Atenção", "Preencha nome, e-mail, registro e senha.");
+      setFeedback({ text: "Preencha nome, e-mail, registro e senha.", type: "error" });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setFeedback({ text: "Informe um e-mail profissional válido.", type: "error" });
+      return;
+    }
+    const phoneDigits = phone.replace(/\D/g, "");
+    if (phoneDigits && phoneDigits.length !== 10 && phoneDigits.length !== 11) {
+      setFeedback({ text: "Telefone deve conter 10 ou 11 dígitos.", type: "error" });
+      return;
+    }
+    if (!specialty) {
+      setFeedback({ text: "Selecione uma especialidade.", type: "error" });
+      return;
+    }
+    if (councilNumber.trim().length > 15) {
+      setFeedback({ text: "Registro profissional deve ter no máximo 15 caracteres.", type: "error" });
       return;
     }
     if (password !== confirmPassword) {
-      Alert.alert("Erro", "As senhas não coincidem!");
+      setFeedback({ text: "As senhas não coincidem.", type: "error" });
       return;
     }
+    setLoading(true);
 
     const payload = {
       nome: name,
       email: email,
-      telefone: phone,
+      telefone: phoneDigits || null,
       especialidade: specialty,
       registro: councilNumber,
       uf: councilUf,
@@ -48,8 +82,8 @@ export default function CadastroMedicoScreen() {
     };
 
     try {
-      const data = await api<{ success?: boolean; message?: string }>(
-        "/api/register/doctor",
+      const data = await api<{ success?: boolean; message?: string; token?: string; access_token?: string }>(
+        "/api/v1/auth/register/doctor",
         {
           method: "POST",
           body: JSON.stringify(payload),
@@ -57,38 +91,47 @@ export default function CadastroMedicoScreen() {
       );
 
       if (data.success !== false) {
-        Alert.alert("Aviso", data.message || "Cadastro realizado com sucesso!");
+        const token = data.token ?? data.access_token;
+        if (token) await setAuthToken(token);
+        setFeedback({ text: data.message || "Cadastro realizado com sucesso!", type: "success" });
         router.replace("/auth/login");
       } else {
-        Alert.alert("Erro", data.message || "Nao foi possivel realizar o cadastro.");
+        setFeedback({ text: data.message || "Nao foi possivel realizar o cadastro.", type: "error" });
       }
     } catch (error) {
-      console.error("Erro na requisição:", error);
-      Alert.alert(
-        "Erro",
-        error instanceof ApiError ? error.message : "Ocorreu um erro ao conectar ao servidor.",
-      );
+      setFeedback({
+        text: error instanceof ApiError ? error.message : "Ocorreu um erro ao conectar ao servidor.",
+        type: "error",
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <View style={styles.screenContainer}>
       {/* Fundos decorativos */}
-      <View style={styles.backgroundTop} />
-      <View style={styles.backgroundBottom} />
+      <View pointerEvents="none" style={styles.backgroundTop} />
+      <View pointerEvents="none" style={styles.backgroundBottom} />
 
       <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={styles.scrollContainer}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
+        keyboardShouldPersistTaps="handled"
+        alwaysBounceVertical
       >
         <View style={styles.container}>
           {/* Cabeçalho / Logo */}
           <View style={styles.logoTitle}>
-            <Image
-              source={require("../../assets/images/logo.png")}
-              style={styles.logo}
-              resizeMode="contain"
-            />
+            <View style={styles.brandRow}>
+              <Image
+                source={require("../../assets/images/logo.png")}
+                style={styles.brandBadge}
+                resizeMode="contain"
+              />
+              <Text style={styles.brandTitle}>EcliPsi</Text>
+            </View>
             <Text style={styles.title}>Cadastro do Profissional</Text>
             <Text style={styles.subtitle}>
               Exclusivo para especialistas em Saúde Mental
@@ -100,10 +143,10 @@ export default function CadastroMedicoScreen() {
             <View style={styles.registerForm}>
               {/* Nome Completo */}
               <View style={styles.sentenceLine}>
-                <TextInput
-                  style={styles.registerInput}
+                <FormInput
+                  accessibilityLabel="Nome Completo"
                   placeholder="Nome Completo"
-                  placeholderTextColor="#888"
+                  placeholderTextColor={palette.muted}
                   value={name}
                   onChangeText={setName}
                 />
@@ -111,10 +154,10 @@ export default function CadastroMedicoScreen() {
 
               {/* E-mail Profissional */}
               <View style={styles.sentenceLine}>
-                <TextInput
-                  style={styles.registerInput}
+                <FormInput
+                  accessibilityLabel="E-mail profissional"
                   placeholder="E-mail profissional"
-                  placeholderTextColor="#888"
+                  placeholderTextColor={palette.muted}
                   keyboardType="email-address"
                   autoCapitalize="none"
                   value={email}
@@ -124,36 +167,43 @@ export default function CadastroMedicoScreen() {
 
               {/* Telefone / WhatsApp */}
               <View style={styles.sentenceLine}>
-                <TextInput
-                  style={styles.registerInput}
+                <FormInput
+                  accessibilityLabel="Telefone / WhatsApp (DD + número)"
                   placeholder="Telefone / WhatsApp (DD + número)"
-                  placeholderTextColor="#888"
+                  placeholderTextColor={palette.muted}
                   keyboardType="phone-pad"
                   value={phone}
-                  onChangeText={setPhone}
+                  onChangeText={(value) => setPhone(formatPhone(value))}
+                  maxLength={15}
                 />
               </View>
 
               {/* Especialidade / Profissão (Simulado com TextInput ou Picker) */}
               <View style={styles.sentenceLine}>
-                <TextInput
-                  style={styles.registerInput}
-                  placeholder="Especialidade (Ex: Psiquiatra, Psicólogo)"
-                  placeholderTextColor="#888"
-                  value={specialty}
-                  onChangeText={setSpecialty}
-                />
+                <View style={styles.optionGroup}>
+                  {specialties.map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      style={[styles.optionChip, specialty === option && styles.optionChipActive]}
+                      onPress={() => setSpecialty(option)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[styles.optionChipText, specialty === option && styles.optionChipTextActive]}>{option}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               </View>
 
               {/* Grupo para Conselho e UF */}
               <View style={styles.formRow}>
                 <View style={[styles.sentenceLine, { flex: 2 }]}>
-                  <TextInput
-                    style={styles.registerInput}
+                  <FormInput
+                    accessibilityLabel="Nº do Registro (CRM / CRP)"
                     placeholder="Nº do Registro (CRM / CRP)"
-                    placeholderTextColor="#888"
+                    placeholderTextColor={palette.muted}
                     value={councilNumber}
                     onChangeText={setCouncilNumber}
+                    maxLength={15}
                   />
                 </View>
                 <View
@@ -163,10 +213,10 @@ export default function CadastroMedicoScreen() {
                     { flex: 1 },
                   ]}
                 >
-                  <TextInput
-                    style={styles.registerInput}
+                  <FormInput
+                    accessibilityLabel="UF"
                     placeholder="UF"
-                    placeholderTextColor="#888"
+                    placeholderTextColor={palette.muted}
                     autoCapitalize="characters"
                     maxLength={2}
                     value={councilUf}
@@ -177,10 +227,11 @@ export default function CadastroMedicoScreen() {
 
               {/* Descrição / Forma de trabalhar */}
               <View style={styles.sentenceLine}>
-                <TextInput
-                  style={[styles.registerInput, styles.textArea]}
+                <FormInput
+                  style={styles.textArea}
+                  accessibilityLabel="Apresentação / Forma de trabalhar (opcional)"
                   placeholder="Apresentação / Forma de trabalhar (opcional)"
-                  placeholderTextColor="#888"
+                  placeholderTextColor={palette.muted}
                   multiline={true}
                   numberOfLines={3}
                   value={description}
@@ -190,10 +241,10 @@ export default function CadastroMedicoScreen() {
 
               {/* Senha */}
               <View style={styles.sentenceLine}>
-                <TextInput
-                  style={styles.registerInput}
+                <FormInput
+                  accessibilityLabel="Crie uma senha"
                   placeholder="Crie uma senha"
-                  placeholderTextColor="#888"
+                  placeholderTextColor={palette.muted}
                   secureTextEntry={true}
                   value={password}
                   onChangeText={setPassword}
@@ -202,10 +253,10 @@ export default function CadastroMedicoScreen() {
 
               {/* Confirmação de Senha */}
               <View style={styles.sentenceLine}>
-                <TextInput
-                  style={styles.registerInput}
+                <FormInput
+                  accessibilityLabel="Confirme sua senha"
                   placeholder="Confirme sua senha"
-                  placeholderTextColor="#888"
+                  placeholderTextColor={palette.muted}
                   secureTextEntry={true}
                   value={confirmPassword}
                   onChangeText={setConfirmPassword}
@@ -214,18 +265,32 @@ export default function CadastroMedicoScreen() {
 
               {/* Botões e Link de Login */}
               <View style={styles.btnLine}>
-                <TouchableOpacity
+                {feedback ? (
+                  <Text
+                    accessibilityRole="alert"
+                    style={[styles.feedback, feedback.type === "success" ? styles.feedbackSuccess : styles.feedbackError]}
+                  >
+                    {feedback.text}
+                  </Text>
+                ) : null}
+                <PrimaryButton
                   style={styles.registerBtn}
                   onPress={handleSubmit}
+                  disabled={loading}
                 >
-                  <Text style={styles.registerBtnText}>
-                    Cadastrar Profissional
-                  </Text>
-                </TouchableOpacity>
+                  {loading ? (
+                    <View style={styles.loadingRow}>
+                      <ActivityIndicator color={palette.white} />
+                      <Text style={styles.registerBtnText}>Cadastrando...</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.registerBtnText}>Cadastrar Profissional</Text>
+                  )}
+                </PrimaryButton>
 
                 <TouchableOpacity
                   style={styles.backBtn}
-                  onPress={() => router.back()}
+                  onPress={() => router.replace("/auth/cadastro")}
                 >
                   <Text style={styles.backBtnText}>Voltar</Text>
                 </TouchableOpacity>
@@ -247,10 +312,24 @@ export default function CadastroMedicoScreen() {
   );
 }
 
+const GuardedScreen = withRouteGuard(CadastroMedicoScreen);
+
+export default function Route() {
+  return (
+    <>
+      <Head>
+        <title>EcliPsi — Cadastro Profissional</title>
+      </Head>
+      <GuardedScreen />
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
   screenContainer: {
     flex: 1,
-    backgroundColor: "#322c8e",
+    minHeight: "100%",
+    backgroundColor: palette.indigo,
   },
   backgroundTop: {
     position: "absolute",
@@ -258,8 +337,8 @@ const styles = StyleSheet.create({
     left: 0,
     width: "100%",
     height: "50%",
-    backgroundColor: "#ffeec2",
-    zIndex: 1,
+    backgroundColor: palette.cream,
+    zIndex: 0,
   },
   backgroundBottom: {
     position: "absolute",
@@ -267,31 +346,63 @@ const styles = StyleSheet.create({
     left: 0,
     width: "100%",
     height: "80%",
-    backgroundColor: "#322c8e",
-    borderTopLeftRadius: 150,
-    borderTopRightRadius: 150,
-    zIndex: 1,
+    backgroundColor: palette.indigo,
+    borderTopLeftRadius: 48,
+    borderTopRightRadius: 48,
+    zIndex: 0,
   },
   scrollContainer: {
     flexGrow: 1,
     alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 20,
-    zIndex: 2,
+    justifyContent: "flex-start",
+    minHeight: "100%",
+    paddingTop: 24,
+    paddingBottom: 32,
+    zIndex: 10,
+  },
+  scrollView: {
+    flex: 1,
+    width: "100%",
+    position: "relative",
+    zIndex: 10,
   },
   container: {
     position: "relative",
+    zIndex: 10,
+    backgroundColor: palette.white,
+    padding: 20,
     alignItems: "center",
     justifyContent: "center",
     width: "90%",
     maxWidth: 500,
     gap: 20,
-    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: 20,
+    shadowColor: palette.indigo,
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   logoTitle: {
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+  },
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  brandBadge: {
+    width: 44,
+    height: 44,
+  },
+  brandTitle: {
+    color: palette.indigo,
+    fontSize: 30,
+    fontWeight: "900",
   },
   logo: {
     width: 200,
@@ -299,13 +410,13 @@ const styles = StyleSheet.create({
     borderRadius: 100,
   },
   title: {
-    color: "#ffffff",
+    color: palette.indigo,
     fontSize: 28,
     fontWeight: "bold",
     textAlign: "center",
   },
   subtitle: {
-    color: "#d196eb",
+    color: palette.wine,
     fontSize: 14,
     textAlign: "center",
   },
@@ -318,7 +429,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     width: "100%",
-    gap: 18,
+    gap: 16,
   },
   formRow: {
     flexDirection: "row",
@@ -326,6 +437,32 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 10,
     width: "100%",
+  },
+  optionGroup: {
+    width: "100%",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  optionChip: {
+    minHeight: 36,
+    justifyContent: "center",
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: 10,
+    backgroundColor: palette.white,
+  },
+  optionChipActive: {
+    backgroundColor: palette.wine,
+    borderColor: palette.wine,
+  },
+  optionChipText: {
+    color: palette.indigo,
+    fontSize: 12,
+  },
+  optionChipTextActive: {
+    color: palette.white,
   },
   sentenceLine: {
     alignItems: "flex-start",
@@ -341,16 +478,6 @@ const styles = StyleSheet.create({
     width: "100%",
     marginTop: 10,
   },
-  registerInput: {
-    padding: 12,
-    width: "100%",
-    borderRadius: 15,
-    borderBottomWidth: 2,
-    borderBottomColor: "#ffffff",
-    backgroundColor: "#ffffff",
-    color: "#333333",
-    fontSize: 14,
-  },
   textArea: {
     height: 90,
     textAlignVertical: "top",
@@ -362,27 +489,49 @@ const styles = StyleSheet.create({
     padding: 12,
     width: "100%",
     borderBottomWidth: 5,
-    borderBottomColor: "#7500a8",
+    borderBottomColor: palette.wine,
     borderRadius: 15,
-    backgroundColor: "#d196eb",
+    backgroundColor: palette.magenta,
+  },
+  feedback: {
+    width: "100%",
+    borderRadius: 10,
+    padding: 10,
+    textAlign: "center",
+    fontWeight: "600",
+  },
+  feedbackError: {
+    color: palette.wine,
+    backgroundColor: palette.salmon,
+  },
+  feedbackSuccess: {
+    color: palette.indigo,
+    backgroundColor: palette.cream,
+  },
+  loadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   },
   registerBtnText: {
-    color: "#1d0027",
+    color: palette.white,
     fontWeight: "bold",
-    fontSize: 16,
+    fontSize: 19,
+    textAlign: "center",
   },
   backBtn: {
     alignItems: "center",
     justifyContent: "center",
-    padding: 10,
+    padding: 12,
     width: "100%",
-    borderBottomWidth: 5,
-    borderBottomColor: "#4a4a4a",
+    borderWidth: 1,
+    borderColor: palette.border,
     borderRadius: 15,
-    backgroundColor: "#a8a8a8",
+    backgroundColor: palette.neutral,
   },
   backBtnText: {
-    color: "#1d0027",
+    color: palette.indigo,
     fontWeight: "bold",
     fontSize: 16,
   },
@@ -393,12 +542,13 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   registerP: {
-    color: "#ffffff",
+    color: palette.muted,
     fontSize: 14,
   },
   registerLink: {
-    color: "#00ffea",
+    color: palette.wine,
     fontSize: 14,
     textDecorationLine: "underline",
+    fontWeight: "bold",
   },
 });
